@@ -1,7 +1,7 @@
 """
 Novo fluxo:
 1. Focar/abrir https://erp.fenixwireless.com.br/
-2. Clicar no ícone/men﻿u “PESQUISA CLIENTES”.
+2. Clicar no ícone/menu “PESQUISA CLIENTES”.
 3. Esperar a tela /SearchPeople carregar, digitar CPF 02690676044 e buscar.
 4. Focar/abrir PipeRun, clicar no 1º cliente da fila.
 """

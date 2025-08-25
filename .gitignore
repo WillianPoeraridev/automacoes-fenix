@@ -1,3 +1,23 @@
+# Virtual environment
 .venv/
 .venv
+
+# Arquivos de configuração local
 .env
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Logs
+*.log
+logs/
+
+# Arquivos temporários de editor
+.vscode/
+.idea/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db

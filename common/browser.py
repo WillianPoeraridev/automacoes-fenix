@@ -1,33 +1,29 @@
-# common/browser.py
 from playwright.sync_api import sync_playwright
-from .config import HEADLESS
-from .utils import log_info
+import os
 
-class Browser:
-    """
-    Context manager para abrir navegador Playwright em 1 linha:
-    with Browser() as page:
-        page.goto("https://exemplo.com")
-    """
-    def __enter__(self):
-        self._pw = sync_playwright().start()
-        self.browser = self._pw.chromium.launch(headless=HEADLESS)
-        self.context = self.browser.new_context()
-        self.page = self.context.new_page()
-        log_info("Browser iniciado")
-        return self.page
+def run(task):
+    with sync_playwright() as p:
+        headless = os.getenv("HEADLESS", "true").lower() == "true"
+        keep_open = os.getenv("KEEP_BROWSER_OPEN", "false").lower() == "true"
+        user_data_dir = os.getenv("USER_DATA_DIR")
+        channel = os.getenv("BROWSER_CHANNEL", "chrome")
 
-    def __exit__(self, exc_type, exc, tb):
-        self.context.close()
-        self.browser.close()
-        self._pw.stop()
-        log_info("Browser fechado")
+        if user_data_dir:
+            # Abre o Chrome REAL com seu perfil (persistente)
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                channel=channel,         # usa o Chrome instalado
+                headless=headless,
+                args=["--start-maximized"]
+            )
+            browser = context.browser
+        else:
+            # fallback (não recomendado p/ seu caso)
+            browser = p.chromium.launch(channel=channel, headless=headless)
+            context = browser.new_context()
 
-def get_browser(cdp_endpoint):
-    """
-    Conecta a uma instância do Chrome já aberta via CDP.
-    Retorna o objeto browser.
-    """
-    playwright = sync_playwright().start()
-    browser = playwright.chromium.connect_over_cdp(cdp_endpoint)
-    return browser
+        try:
+            task(context)
+        finally:
+            if not keep_open:
+                context.close()
