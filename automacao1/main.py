@@ -1,78 +1,45 @@
+# automacao1/main.py
+from common.tabs import get_or_open
+from playwright.sync_api import Page
+
+VOALLE_URL   = "https://erp.fenixwireless.com.br/assignments"
+VOALLE_MATCH = "fenixwireless.com.br"   # fragmento de URL/título para achar a aba existente
+
+# --- CSS para remover max-width e deixar o layout fluido ---
+CSS_WIDE = """
+html, body { max-width: none !important; width: 100% !important; }
+#app, .app, .container, .content, .wrapper, .page, .layout, .root, .main, .container-fluid {
+  max-width: none !important;
+  width: 100% !important;
+}
+aside, .sidebar, [class*="sidebar"] {
+  max-width: 240px !important; width: 240px !important;
+}
+body { overflow-x: hidden !important; }
 """
-Novo fluxo:
-1. Focar/abrir https://erp.fenixwireless.com.br/
-2. Clicar no ícone/menu “PESQUISA CLIENTES”.
-3. Esperar a tela /SearchPeople carregar, digitar CPF 02690676044 e buscar.
-4. Focar/abrir PipeRun, clicar no 1º cliente da fila.
-"""
 
-from common.browser import Browser
-from common.utils import log_info
-from playwright.sync_api import TimeoutError
+def widen_layout(page: Page) -> None:
+    try:
+        page.add_style_tag(content=CSS_WIDE)
+    except Exception:
+        pass
 
-# ---------------- URLs ----------------
-VOALLE_HOME  = "https://erp.fenixwireless.com.br/"
-VOALLE_SEARCH = "https://erp.fenixwireless.com.br/SearchPeople"
-PIPERUN_URL = "https://rapidanet.cxm.pipe.run/agent"
-CPF = "02690676044"
+def run(ctx):
+    # Reutiliza a aba do Voalle (ou abre se não existir) e espera a página carregar
+    page = get_or_open(
+        ctx,
+        match_or_url=VOALLE_MATCH,   # se a aba já existir, reutiliza
+        ensure_url=VOALLE_URL,       # se não existir, navega para /assignments
+        wait_selector="body"
+    )
 
-# ------------- seletores ---------------
-BTN_PESQ = 'a[title="PESQUISA CLIENTES"]'
-INPUT_BUSCA = 'input#search, input[name="search"]'   # tente id OU name
-CLIENTE_PRIMEIRO = "div.talk-button"
-# ---------------------------------------
+    # Deixa o layout ocupar toda a largura
+    widen_layout(page)
 
-def open_or_focus(ctx, prefix: str, full: str):
-    """Retorna aba já existente que começa com `prefix` ou abre nova."""
-    p = next((p for p in ctx.pages if p.url.startswith(prefix)), None)
-    if not p:
-        p = ctx.new_page()
-        p.goto(full, wait_until="domcontentloaded")
-        log_info(f"Nova aba em {full}")
-    else:
-        log_info(f"Aba já existente → {p.url}")
-    p.bring_to_front()          # garante janela na frente
-    return p
+    # (opcional) marca visualmente a página para confirmar que a automação tocou nela
+    # page.evaluate("""
+    #     document.body.style.outline='3px solid lime';
+    #     document.title = '🟢 [AUTOMAÇÃO] ' + document.title;
+    # """)
 
-def run():
-    with Browser() as dummy:
-        ctx = dummy.context
-
-        # ---------- 1. Home do Voalle ----------
-        voalle = open_or_focus(ctx, VOALLE_HOME, VOALLE_HOME)
-
-        # clica no menu “Pesquisa Clientes”
-        if voalle.locator(BTN_PESQ).count():
-            voalle.click(BTN_PESQ)
-            log_info("Cliquei em PESQUISA CLIENTES")
-        else:
-            print("‼️  Não achei o botão PESQUISA CLIENTES; ajuste BTN_PESQ se necessário.")
-            return
-
-        # ---------- 2. Tela /SearchPeople ----------
-        try:
-            voalle.wait_for_url("**/SearchPeople*", timeout=10000)
-            voalle.wait_for_selector(INPUT_BUSCA, timeout=10000)
-        except TimeoutError:
-            print("‼️  Campo de busca não apareceu.\n"
-                  "     Copie o seletor exato no DevTools e ajuste INPUT_BUSCA.")
-            return
-
-        voalle.fill(INPUT_BUSCA, CPF)
-        voalle.keyboard.press("Enter")
-        log_info(f"Enviado CPF {CPF} no Voalle")
-
-        # ---------- 3. PipeRun ----------
-        pipe = open_or_focus(ctx, PIPERUN_URL, PIPERUN_URL)
-
-        try:
-            pipe.wait_for_selector(CLIENTE_PRIMEIRO, timeout=10000)
-            pipe.click(CLIENTE_PRIMEIRO)
-            log_info("Clicado primeiro cliente na fila PipeRun")
-        except TimeoutError:
-            print("‼️  Cliente não encontrado; ajuste CLIENTE_PRIMEIRO se mudou o HTML.")
-
-        input("✅  Fluxo terminado. Enter para desconectar…")
-
-if __name__ == "__main__":
-    run()
+    print("✅ Voalle (/assignments) focado/aberto na MESMA aba e com layout alargado.")

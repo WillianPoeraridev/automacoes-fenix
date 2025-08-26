@@ -3,9 +3,10 @@
 Este repositório centraliza todas as automações web da empresa (Python + Playwright).
 
 ## Estrutura
-- `common/` : módulos compartilhados (browser, config, utils)
-- `automacao1/` : primeiro fluxo automatizado
-- `automacao2/` : segundo fluxo automatizado
+python agent.py   # inicia o agente e as hotkeys
+Ctrl+F7           # dispara automacao1
+Ctrl+Shift+Q      # encerra o agente
+
 
 ## Como usar
 1. `pip install -r requirements.txt`
