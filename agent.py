@@ -31,6 +31,14 @@ def hotkey_task(fn, ctx):
             TASK_LOCK.release()
     return wrapper
 
+def attach_listeners(ctx):
+    """Loga falhas de rede nas páginas (útil para diagnosticar proxy/rede)."""
+    def hook(page):
+        page.on("requestfailed", lambda r: print(f"❌ Request failed: {r.url} -> {r.failure}"))
+    for p in ctx.pages:
+        hook(p)
+    ctx.on("page", hook)
+
 def sanity_check(ctx):
     """Abre example.com só para testar rede. Fecha em seguida."""
     try:
@@ -44,7 +52,7 @@ def sanity_check(ctx):
         return False
 
 def open_startup_tabs(ctx):
-    """Abre STARTUP_URLS sem deixar aba about:blank pendurada e com logs claros."""
+    """Abre STARTUP_URLS sem deixar aba about:blank pendurada."""
     raw = os.getenv("STARTUP_URLS", "").strip()
     print(f"🛈 STARTUP_URLS={raw!r}")
     if not raw:
@@ -54,30 +62,41 @@ def open_startup_tabs(ctx):
         print("⚠️ Nenhuma URL válida em STARTUP_URLS.")
         return
 
-    try:
-        # Reaproveita a primeira aba se for em branco
-        if ctx.pages and ctx.pages[0].url in ("about:blank", "chrome://newtab/"):
-            first = urls.pop(0)
-            print(f"↪️  Navegando a primeira aba para: {first}")
-            ctx.pages[0].goto(first, wait_until="domcontentloaded", timeout=45000)
+    # Reaproveita a primeira aba se for em branco
+    if ctx.pages and ctx.pages[0].url in ("about:blank", "chrome://newtab/"):
+        first = urls.pop(0)
+        print(f"↪️ Navegando a primeira aba para: {first}")
+        ctx.pages[0].goto(first, wait_until="domcontentloaded", timeout=45000)
 
-        # Abre demais em novas abas
-        for u in urls:
-            print(f"➕ Abrindo nova aba: {u}")
-            page = ctx.new_page()
-            page.goto(u, wait_until="domcontentloaded", timeout=45000)
+    # Abre o resto em novas abas
+    for u in urls:
+        print(f"➕ Nova aba: {u}")
+        page = ctx.new_page()
+        page.goto(u, wait_until="domcontentloaded", timeout=45000)
 
-        # Fecha qualquer about:blank que tenha sobrado
-        blanks = [p for p in ctx.pages if p.url == "about:blank"]
-        for p in blanks:
-            try:
-                p.close()
-            except Exception:
-                pass
+    # Fecha qualquer about:blank que tenha sobrado
+    for p in [p for p in ctx.pages if p.url == "about:blank"]:
+        try:
+            p.close()
+        except Exception:
+            pass
+    print("✅ Abas iniciais prontas.")
 
-        print("✅ Abas iniciais prontas.")
-    except Exception as e:
-        print("❌ Erro ao abrir STARTUP_URLS:", e)
+STEALTH_JS = r"""
+// reduzir alguns sinais de automação (não engana Google signin)
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR','pt']});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
+try {
+  const getParameter = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function(param) {
+    if (param === 37445) return 'Intel Open Source Technology Center';
+    if (param === 37446) return 'Mesa DRI Intel(R) UHD Graphics';
+    return getParameter.apply(this, [param]);
+  };
+} catch(e) {}
+"""
 
 def main():
     user_data_dir = os.getenv("USER_DATA_DIR")
@@ -91,7 +110,7 @@ def main():
     headless = os.getenv("HEADLESS", "false").lower() == "true"
     chrome_profile = os.getenv("CHROME_PROFILE", "").strip()
 
-    # --- monta args (igual você já tinha) ---
+    # -------- ARGS do Chrome (janela e escala/DPI) --------
     args = []
     win_size = os.getenv("WINDOW_SIZE", "").strip()
     if win_size:
@@ -105,8 +124,19 @@ def main():
     dsf = os.getenv("CHROME_DSF", "").strip()
     if dsf:
         args.extend([f"--force-device-scale-factor={dsf}", "--high-dpi-support=1"])
+
     if chrome_profile:
         args.append(f"--profile-directory={chrome_profile}")
+
+    # Modo "stealth" leve (opcional)
+    if os.getenv("STEALTH", "false").lower() == "true":
+        args.append("--disable-blink-features=AutomationControlled")
+        args.append("--disable-infobars")
+
+    # PROXY opcional (útil se rodar como Admin e a rede exigir proxy)
+    proxy_server = os.getenv("PROXY_SERVER", "").strip()
+    proxy_bypass = os.getenv("PROXY_BYPASS", "").strip()
+    proxy = {"server": proxy_server, "bypass": proxy_bypass} if proxy_server else None
 
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
@@ -114,24 +144,27 @@ def main():
             channel=channel,
             headless=headless,
             args=args,
+            proxy=proxy,  # só é usado se proxy_server estiver preenchido
         )
 
-        # ✅ COLOQUE AQUI:
+        # stealth js
+        if os.getenv("STEALTH", "false").lower() == "true":
+            ctx.add_init_script(STEALTH_JS)
+
+        attach_listeners(ctx)
+
         ok = sanity_check(ctx)
         if not ok:
-            print("⚠️ Verifique sua conexão/rede/proxy. Vou manter o agente aberto mesmo assim.")
+            print("⚠️ Verifique conexão/proxy. Vou manter o agente aberto mesmo assim.")
 
-        # depois do teste, abra as abas iniciais
         open_startup_tabs(ctx)
 
         print("🚀 Agente ativo.")
         print(f"Perfil base: {user_data_dir}")
-        if chrome_profile:
-            print(f"Profile Directory: {chrome_profile}")
-        if win_size:
-            print(f"Window size: {win_size}")
-        if dsf:
-            print(f"Device scale factor: {dsf}")
+        if chrome_profile: print(f"Profile Directory: {chrome_profile}")
+        if win_size:       print(f"Window size: {win_size}")
+        if dsf:            print(f"Device scale factor: {dsf}")
+        if proxy_server:   print(f"Proxy: {proxy_server} (bypass: {proxy_bypass})")
 
         print("Atalhos:")
         print("  CTRL+F7        -> venda_voalle (automacao1)")
